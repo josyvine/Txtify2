@@ -10,6 +10,7 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class ZipContentsAdapter extends RecyclerView.Adapter<ZipContentsAdapter.ViewHolder> {
 
@@ -70,6 +71,65 @@ public class ZipContentsAdapter extends RecyclerView.Adapter<ZipContentsAdapter.
         return included;
     }
 
+    /**
+     * Filters and includes ONLY files matching the target file names list.
+     * All non-matching files are automatically excluded.
+     *
+     * @param targetFileNames Set of sanitized file names.
+     * @return Number of files matched and included.
+     */
+    public int applyTargetFileNamesFilter(Set<String> targetFileNames) {
+        if (targetFileNames == null || targetFileNames.isEmpty() || zipEntries == null) {
+            return 0;
+        }
+
+        int matchCount = 0;
+        for (ZipEntryItem item : zipEntries) {
+            String fileName = item.getFileName();
+            String fullPath = item.getFullPath();
+
+            // Check match against simple file name or full relative path inside the ZIP
+            boolean isMatched = FileNameParserUtils.matchesAny(fileName, targetFileNames)
+                    || FileNameParserUtils.matchesAny(fullPath, targetFileNames);
+
+            if (isMatched) {
+                item.setIncluded(true);
+                matchCount++;
+            } else {
+                item.setIncluded(false);
+            }
+        }
+
+        notifyDataSetChanged();
+        return matchCount;
+    }
+
+    /**
+     * Marks all files as included.
+     */
+    public void selectAll() {
+        if (zipEntries == null) {
+            return;
+        }
+        for (ZipEntryItem item : zipEntries) {
+            item.setIncluded(true);
+        }
+        notifyDataSetChanged();
+    }
+
+    /**
+     * Marks all files as excluded.
+     */
+    public void clearAll() {
+        if (zipEntries == null) {
+            return;
+        }
+        for (ZipEntryItem item : zipEntries) {
+            item.setIncluded(false);
+        }
+        notifyDataSetChanged();
+    }
+
     public static class ViewHolder extends RecyclerView.ViewHolder {
         ImageView statusIcon;
         TextView fileName;
@@ -83,4 +143,3 @@ public class ZipContentsAdapter extends RecyclerView.Adapter<ZipContentsAdapter.
         }
     }
 }
-
