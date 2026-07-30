@@ -2,8 +2,10 @@ package com.txtify.app;
 
 import android.Manifest;
 import android.app.Dialog;
+import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.pm.PackageManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.LayoutInflater;
@@ -52,6 +54,7 @@ public class FileBrowserDialogFragment extends DialogFragment {
     private Button selectAllButton;
     private Button clearSelectionButton;
     private Button closeButton; // NEW
+    private Button pasteSearchButton; // NEW: Paste and search button
 
     private File currentDirectory;
     private FileBrowserCallbacks callbacks;
@@ -105,6 +108,7 @@ public class FileBrowserDialogFragment extends DialogFragment {
         selectAllButton = view.findViewById(R.id.button_select_all);
         clearSelectionButton = view.findViewById(R.id.button_clear_selection);
         closeButton = view.findViewById(R.id.button_close_browser); // NEW
+        pasteSearchButton = view.findViewById(R.id.button_paste_search); // NEW
 
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
 
@@ -158,7 +162,107 @@ public class FileBrowserDialogFragment extends DialogFragment {
 				}
 			});
 
+        // NEW: Listener for "Paste & Search" button
+        if (pasteSearchButton != null) {
+            pasteSearchButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showPasteSearchDialog();
+                }
+            });
+        }
+
         checkAndRequestPermissions();
+    }
+
+    /**
+     * Shows the paste dialog where user pastes file names list.
+     * Launches a recursive search starting from the current directory.
+     */
+    private void showPasteSearchDialog() {
+        if (currentDirectory == null) {
+            Toast.makeText(getContext(), "Please select a parent directory first.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        PasteListDialogFragment dialog = PasteListDialogFragment.newInstance();
+        dialog.setOnListPastedListener(new PasteListDialogFragment.OnListPastedListener() {
+            @Override
+            public void onListPasted(Set<String> parsedFileNames) {
+                new RecursiveSearchTask(currentDirectory, parsedFileNames).execute();
+            }
+        });
+        dialog.show(getChildFragmentManager(), "paste_search_dialog");
+    }
+
+    /**
+     * AsyncTask to recursively traverse all subfolders under currentDirectory
+     * and select any matching files automatically.
+     */
+    private class RecursiveSearchTask extends AsyncTask<Void, Void, List<File>> {
+        private final File parentDir;
+        private final Set<String> targetNames;
+        private ProgressDialog progressDialog;
+
+        public RecursiveSearchTask(File parentDir, Set<String> targetNames) {
+            this.parentDir = parentDir;
+            this.targetNames = targetNames;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            progressDialog = new ProgressDialog(getContext());
+            progressDialog.setMessage("Searching subfolders for matching files...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+        }
+
+        @Override
+        protected List<File> doInBackground(Void... voids) {
+            List<File> matchedFiles = new ArrayList<>();
+            searchFolderRecursively(parentDir, targetNames, matchedFiles);
+            return matchedFiles;
+        }
+
+        private void searchFolderRecursively(File dir, Set<String> targets, List<File> result) {
+            if (dir == null || !dir.exists() || !dir.isDirectory() || !dir.canRead()) {
+                return;
+            }
+
+            File[] files = dir.listFiles();
+            if (files == null) {
+                return;
+            }
+
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    searchFolderRecursively(file, targets, result);
+                } else if (file.isFile()) {
+                    if (FileNameParserUtils.matchesAny(file.getName(), targets)) {
+                        result.add(file);
+                    }
+                }
+            }
+        }
+
+        @Override
+        protected void onPostExecute(List<File> matchedFiles) {
+            super.onPostExecute(matchedFiles);
+            if (progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.dismiss();
+            }
+
+            if (matchedFiles.isEmpty()) {
+                Toast.makeText(getContext(), "No matching files found in subfolders.", Toast.LENGTH_LONG).show();
+            } else {
+                selectedFiles.addAll(matchedFiles);
+                if (adapter != null) {
+                    adapter.notifyDataSetChanged();
+                }
+                Toast.makeText(getContext(), "Found & selected " + matchedFiles.size() + " file(s) across subfolders.", Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     @Override
