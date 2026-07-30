@@ -81,6 +81,23 @@ public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.
         notifyDataSetChanged();
     }
 
+    // NEW: Selects files in current directory list matching the target names.
+    public int selectMatchingFiles(Set<String> targetNames) {
+        if (targetNames == null || targetNames.isEmpty()) {
+            return 0;
+        }
+
+        int count = 0;
+        for (File file : files) {
+            if (!file.isDirectory() && FileNameParserUtils.matchesAny(file.getName(), targetNames)) {
+                selectedFiles.add(file);
+                count++;
+            }
+        }
+        notifyDataSetChanged();
+        return count;
+    }
+
 
     @NonNull
     @Override
@@ -205,4 +222,3 @@ public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.
         }
     }
 }
-
