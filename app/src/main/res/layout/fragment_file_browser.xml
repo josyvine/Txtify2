@@ -15,6 +15,7 @@
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
         android:background="?attr/colorPrimary">
+        
         <ImageButton
             android:id="@+id/button_up_directory"
             android:layout_width="48dp"
@@ -23,6 +24,7 @@
             android:contentDescription="Up to parent directory"
             android:background="?attr/selectableItemBackgroundBorderless"
             app:tint="@android:color/white" />
+
         <TextView
             android:id="@+id/text_current_path"
             android:layout_width="0dp"
@@ -65,7 +67,21 @@
             style="?android:attr/borderlessButtonStyle"
             android:textColor="@color/textColorPrimary"
             android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
+            android:layout_marginEnd="2dp"
+            android:textSize="11sp" />
+
+        <!-- NEW: Paste and Search Button -->
+        <Button
+            android:id="@+id/button_paste_search"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Paste &amp; Search"
+            style="?android:attr/borderlessButtonStyle"
+            android:textColor="@color/textColorPrimary"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/button_clear_selection"
@@ -75,20 +91,23 @@
             android:text="Clear Selection"
             style="?android:attr/borderlessButtonStyle"
             android:textColor="@color/textColorPrimary"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
-    </LinearLayout>
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="4dp"
+            android:textSize="11sp" />
 
+    </LinearLayout>
 
     <!-- File List Area -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recycler_view_files"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+
         <TextView
             android:id="@+id/text_empty_folder"
             android:layout_width="match_parent"
@@ -98,6 +117,7 @@
             android:textSize="16sp"
             android:textColor="@color/textColorSecondary"
             android:visibility="gone" />
+
     </FrameLayout>
 
     <!-- NEW: Close button at the bottom -->
@@ -111,4 +131,3 @@
         android:layout_margin="8dp"/>
 
 </LinearLayout>
-
