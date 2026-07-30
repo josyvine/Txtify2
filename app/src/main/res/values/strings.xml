@@ -48,5 +48,13 @@
     <string name="contact_success">Thank you! Your message has been sent.</string>
     <string name="contact_error">Something went wrong. Please try again later.</string>
 
-</resources>
+    <!-- NEW: Strings for Paste List & Batch Search Features -->
+    <string name="paste_list_title">Paste File Names List</string>
+    <string name="paste_list_instruction">Paste your list of file names below. Numbering (e.g. 1.), bullets, and quotes will be stripped automatically.</string>
+    <string name="paste_clipboard">Paste from Clipboard</string>
+    <string name="paste_apply">Apply Selection</string>
+    <string name="paste_cancel">Cancel</string>
+    <string name="paste_search_button">Paste &amp; Search</string>
+    <string name="paste_list_menu">Paste List</string>
 
+</resources>
