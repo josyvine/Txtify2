@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -66,6 +67,17 @@ public class ZipContentsActivity extends AppCompatActivity {
 				}
 			});
 
+        // NEW: Direct listener binding for the layout's "Paste List" button
+        Button pasteListButton = findViewById(R.id.button_paste_zip_list);
+        if (pasteListButton != null) {
+            pasteListButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showPasteListDialog();
+                }
+            });
+        }
+
         zipUri = getIntent().getParcelableExtra(EXTRA_ZIP_URI);
         if (zipUri != null) {
             new ReadZipTask().execute(zipUri);
@@ -73,6 +85,29 @@ public class ZipContentsActivity extends AppCompatActivity {
             Toast.makeText(this, "Error: No ZIP file URI provided.", Toast.LENGTH_LONG).show();
             finish();
         }
+    }
+
+    /**
+     * Opens the PasteListDialogFragment to accept a pasted multi-line file list.
+     * Automatically filters zip entries so ONLY matched files are selected.
+     */
+    private void showPasteListDialog() {
+        if (adapter == null || zipEntryItems.isEmpty()) {
+            Toast.makeText(this, "ZIP contents are empty or still loading.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        PasteListDialogFragment dialog = PasteListDialogFragment.newInstance();
+        dialog.setOnListPastedListener(new PasteListDialogFragment.OnListPastedListener() {
+            @Override
+            public void onListPasted(Set<String> parsedFileNames) {
+                int matchedCount = adapter.applyTargetFileNamesFilter(parsedFileNames);
+                Toast.makeText(ZipContentsActivity.this,
+                    "Selected " + matchedCount + " matching file(s) out of " + zipEntryItems.size() + ".",
+                    Toast.LENGTH_LONG).show();
+            }
+        });
+        dialog.show(getSupportFragmentManager(), "paste_list_dialog");
     }
 
     @Override
@@ -150,4 +185,3 @@ public class ZipContentsActivity extends AppCompatActivity {
         }
     }
 }
-
