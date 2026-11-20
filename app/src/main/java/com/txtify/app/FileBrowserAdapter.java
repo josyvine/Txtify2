@@ -3,101 +3,130 @@ package com.txtify.app;
 import android.content.ClipData;
 import android.content.Context;
 import android.graphics.Color;
-import android.os.Build;
+import android.net.Uri;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
-import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
 import androidx.recyclerview.widget.RecyclerView;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.ViewHolder> {
 
-    private final List<File> files;
+    private final List<DocumentFile> files;
     private final Context context;
-    private OnItemClickListener clickListener;
-    private OnDragStartListener dragListener;
+    private final OnItemClickListener clickListener;
+    private final OnDragStartListener dragListener;
 
-    // MODIFIED: This is now a reference to the master set from the Fragment.
-    private final Set<File> selectedFiles;
+    // Master selection set of URIs from FileBrowserDialogFragment
+    private final Set<Uri> selectedFiles;
     private final int selectionColor;
 
+    // Lightweight metadata cache to keep SAF sorting and scrolling fast
+    private final Map<Uri, String> nameCache = new HashMap<>();
+    private final Map<Uri, Boolean> dirCache = new HashMap<>();
 
     public interface OnItemClickListener {
-        void onItemClick(File file);
+        void onItemClick(DocumentFile file);
     }
 
     public interface OnDragStartListener {
         void onDragStarted();
     }
 
-    // MODIFIED: Constructor now accepts the master selection set.
-    public FileBrowserAdapter(Context context, List<File> files, Set<File> selectedFiles, OnItemClickListener clickListener, OnDragStartListener dragListener) {
+    public FileBrowserAdapter(Context context, List<DocumentFile> files, Set<Uri> selectedFiles, OnItemClickListener clickListener, OnDragStartListener dragListener) {
         this.context = context;
         this.files = files;
-        this.selectedFiles = selectedFiles; // Use the passed-in master set.
+        this.selectedFiles = selectedFiles;
         this.clickListener = clickListener;
         this.dragListener = dragListener;
-
-        // A semi-transparent version of the accent color for highlighting selections.
         this.selectionColor = 0x5000ACC1;
 
-        Collections.sort(this.files, new Comparator<File>() {
-				@Override
-				public int compare(File f1, File f2) {
-					if (f1.isDirectory() && !f2.isDirectory()) {
-						return -1;
-					} else if (!f1.isDirectory() && f2.isDirectory()) {
-						return 1;
-					} else {
-						return f1.getName().compareToIgnoreCase(f2.getName());
-					}
-				}
-			});
+        for (DocumentFile doc : this.files) {
+            Uri uri = doc.getUri();
+            String name = doc.getName();
+            nameCache.put(uri, name != null ? name : "");
+            dirCache.put(uri, doc.isDirectory());
+        }
+
+        Collections.sort(this.files, new Comparator<DocumentFile>() {
+            @Override
+            public int compare(DocumentFile f1, DocumentFile f2) {
+                boolean d1 = isDir(f1);
+                boolean d2 = isDir(f2);
+                if (d1 && !d2) {
+                    return -1;
+                } else if (!d1 && d2) {
+                    return 1;
+                } else {
+                    return getFileName(f1).compareToIgnoreCase(getFileName(f2));
+                }
+            }
+        });
     }
 
-    // This method adds all files (not directories) from the CURRENT list to the master set.
+    private String getFileName(DocumentFile doc) {
+        Uri uri = doc.getUri();
+        String cached = nameCache.get(uri);
+        if (cached == null) {
+            cached = doc.getName();
+            if (cached == null) cached = "";
+            nameCache.put(uri, cached);
+        }
+        return cached;
+    }
+
+    private boolean isDir(DocumentFile doc) {
+        Uri uri = doc.getUri();
+        Boolean cached = dirCache.get(uri);
+        if (cached == null) {
+            cached = doc.isDirectory();
+            dirCache.put(uri, cached);
+        }
+        return cached;
+    }
+
+    // Adds all files (not directories) from the current list to the master set
     public void selectAllFiles() {
-        for (File file : files) {
-            if (!file.isDirectory()) {
-                selectedFiles.add(file);
+        for (DocumentFile file : files) {
+            if (!isDir(file)) {
+                selectedFiles.add(file.getUri());
             }
         }
-        notifyDataSetChanged(); // Redraw the entire list to show selections.
+        notifyDataSetChanged();
     }
 
-    // This method clears the ENTIRE master selection set.
+    // Clears the entire master selection set
     public void clearSelection() {
         selectedFiles.clear();
         notifyDataSetChanged();
     }
 
-    // NEW: Selects files in current directory list matching the target names.
+    // Selects files in current directory list matching the target names
     public int selectMatchingFiles(Set<String> targetNames) {
         if (targetNames == null || targetNames.isEmpty()) {
             return 0;
         }
 
         int count = 0;
-        for (File file : files) {
-            if (!file.isDirectory() && FileNameParserUtils.matchesAny(file.getName(), targetNames)) {
-                selectedFiles.add(file);
+        for (DocumentFile file : files) {
+            if (!isDir(file) && FileNameParserUtils.matchesAny(getFileName(file), targetNames)) {
+                selectedFiles.add(file.getUri());
                 count++;
             }
         }
         notifyDataSetChanged();
         return count;
     }
-
 
     @NonNull
     @Override
@@ -108,7 +137,7 @@ public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.
 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-        File file = files.get(position);
+        DocumentFile file = files.get(position);
         holder.bind(file, clickListener, dragListener);
     }
 
@@ -117,7 +146,6 @@ public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.
         return files.size();
     }
 
-    // The ViewHolder class needs to be an inner class to access adapter members like selectedFiles.
     class ViewHolder extends RecyclerView.ViewHolder {
         ImageView icon;
         TextView name;
@@ -128,94 +156,83 @@ public class FileBrowserAdapter extends RecyclerView.Adapter<FileBrowserAdapter.
             name = itemView.findViewById(R.id.text_file_name);
         }
 
-        public void bind(final File file, final OnItemClickListener clickListener, final OnDragStartListener dragListener) {
-            name.setText(file.getName());
+        public void bind(final DocumentFile file, final OnItemClickListener clickListener, final OnDragStartListener dragListener) {
+            final Uri fileUri = file.getUri();
+            final boolean directory = isDir(file);
+            name.setText(getFileName(file));
 
-            if (file.isDirectory()) {
+            if (directory) {
                 icon.setImageResource(R.drawable.ic_menu_browse);
             } else {
                 icon.setImageResource(R.drawable.ic_file_generic);
             }
 
-            // Set the background color based on selection state (using the master set).
-            if (selectedFiles.contains(file)) {
+            if (selectedFiles.contains(fileUri)) {
                 itemView.setBackgroundColor(selectionColor);
             } else {
                 itemView.setBackgroundColor(Color.TRANSPARENT);
             }
 
-            // Short click handles selection for files. This now modifies the master set.
             itemView.setOnClickListener(new View.OnClickListener() {
-					@Override
-					public void onClick(View v) {
-						if (file.isDirectory()) {
-							// Clicking a directory still navigates.
-							clickListener.onItemClick(file);
-						} else {
-							// Clicking a file toggles its selection in the master set.
-							if (selectedFiles.contains(file)) {
-								selectedFiles.remove(file);
-							} else {
-								selectedFiles.add(file);
-							}
-							// Redraw this specific item to update its background.
-							notifyItemChanged(getAdapterPosition());
-						}
-					}
-				});
+                @Override
+                public void onClick(View v) {
+                    if (directory) {
+                        clickListener.onItemClick(file);
+                    } else {
+                        if (selectedFiles.contains(fileUri)) {
+                            selectedFiles.remove(fileUri);
+                        } else {
+                            selectedFiles.add(fileUri);
+                        }
+                        int pos = getAdapterPosition();
+                        if (pos != RecyclerView.NO_POSITION) {
+                            notifyItemChanged(pos);
+                        }
+                    }
+                }
+            });
 
-            // Long click initiates a drag. This functionality is preserved.
-            if (!file.isDirectory()) {
+            if (!directory) {
                 itemView.setOnLongClickListener(new View.OnLongClickListener() {
-						@Override
-						public boolean onLongClick(View v) {
-							List<File> filesToDrag = new ArrayList<>();
+                    @Override
+                    public boolean onLongClick(View v) {
+                        List<Uri> urisToDrag = new ArrayList<>();
 
-							// If other files are selected, drag the whole selection.
-							// Otherwise, just drag the file that was long-pressed.
-							if (!selectedFiles.isEmpty() && selectedFiles.contains(file)) {
-								filesToDrag.addAll(selectedFiles);
-							} else {
-								filesToDrag.add(file);
-							}
+                        if (!selectedFiles.isEmpty() && selectedFiles.contains(fileUri)) {
+                            urisToDrag.addAll(selectedFiles);
+                        } else {
+                            urisToDrag.add(fileUri);
+                        }
 
-							// If no files are ready to be dragged, do nothing.
-							if (filesToDrag.isEmpty()) {
-								return false;
-							}
+                        if (urisToDrag.isEmpty()) {
+                            return false;
+                        }
 
-							// Build a single string with all file paths, separated by a newline.
-							StringBuilder paths = new StringBuilder();
-							for (int i = 0; i < filesToDrag.size(); i++) {
-								paths.append(filesToDrag.get(i).getAbsolutePath());
-								if (i < filesToDrag.size() - 1) {
-									paths.append("\n");
-								}
-							}
+                        StringBuilder uriClip = new StringBuilder();
+                        for (int i = 0; i < urisToDrag.size(); i++) {
+                            uriClip.append(urisToDrag.get(i).toString());
+                            if (i < urisToDrag.size() - 1) {
+                                uriClip.append("\n");
+                            }
+                        }
 
-							ClipData.Item item = new ClipData.Item(paths.toString());
-							ClipData dragData = new ClipData(
-								"file_paths", // Note plural label
-								new String[]{"text/plain"},
-								item
-							);
+                        ClipData.Item item = new ClipData.Item(uriClip.toString());
+                        ClipData dragData = new ClipData(
+                                "file_paths",
+                                new String[]{"text/plain"},
+                                item
+                        );
 
-							View.DragShadowBuilder myShadow = new View.DragShadowBuilder(itemView);
+                        View.DragShadowBuilder myShadow = new View.DragShadowBuilder(itemView);
+                        v.startDragAndDrop(dragData, myShadow, null, View.DRAG_FLAG_GLOBAL);
 
-							if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-								int dragFlags = View.DRAG_FLAG_GLOBAL;
-								v.startDragAndDrop(dragData, myShadow, null, dragFlags);
-							} else {
-								v.startDrag(dragData, myShadow, null, 0);
-							}
+                        if (dragListener != null) {
+                            dragListener.onDragStarted();
+                        }
 
-							if (dragListener != null) {
-								dragListener.onDragStarted();
-							}
-
-							return true; 
-						}
-					});
+                        return true;
+                    }
+                });
             } else {
                 itemView.setOnLongClickListener(null);
             }
