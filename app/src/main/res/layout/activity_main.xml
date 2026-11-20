@@ -11,25 +11,24 @@
 
     <!-- 1. The main content view. WRAPPED IN A RELATIVELAYOUT TO POSITION THE JUNCTION BOX -->
     <RelativeLayout
+        android:id="@+id/main_root_layout"
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <!-- NEW: Banner AdView Pinned to Bottom -->
-        <com.google.android.gms.ads.AdView
-            android:id="@+id/adView"
-            android:layout_width="wrap_content"
+        <!-- Banner Ad Container Pinned to Bottom (AdUnitId loaded securely from encrypted C++ via NativeBridge) -->
+        <FrameLayout
+            android:id="@+id/ad_container"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_alignParentBottom="true"
-            android:layout_centerHorizontal="true"
-            app:adSize="BANNER"
-            app:adUnitId="ca-app-pub-2223803405403727/7474403554" />
+            android:layout_centerHorizontal="true" />
 
         <!-- Main Content Area -->
-        <!-- Added layout_above to prevent the list from being hidden behind the ad -->
+        <!-- Uses layout_above="@id/ad_container" to prevent the list from being hidden behind the ad -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_above="@id/adView"
+            android:layout_above="@id/ad_container"
             android:orientation="vertical">
 
             <!-- Toolbar (unchanged) -->
@@ -91,13 +90,12 @@
             </FrameLayout>
         </LinearLayout>
 
-        <!-- NEW: The "Junction Box" Drop Zone -->
-        <!-- Changed alignParentBottom to layout_above="@id/adView" so it sits on top of the ad -->
+        <!-- The "Junction Box" Drop Zone -->
         <LinearLayout
             android:id="@+id/junction_box_drop_zone"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_above="@id/adView"
+            android:layout_above="@id/ad_container"
             android:orientation="vertical"
             android:background="#DD263238"
             android:padding="16dp"
