@@ -6,8 +6,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Upgrade the Android Gradle Plugin to a version compatible with modern libraries and SDK 34.
-        classpath 'com.android.tools.build:gradle:8.1.4'
+        // Upgraded to AGP 8.10.0 to match Gradle 8.11.1 and Android SDK 36 (same as LunarTag)
+        classpath 'com.android.tools.build:gradle:8.10.0'
         
         // REQUIRED: Add the Google services classpath for AdMob integration
         classpath 'com.google.gms:google-services:4.4.1'
