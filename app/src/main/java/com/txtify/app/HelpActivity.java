@@ -4,9 +4,13 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 public class HelpActivity extends AppCompatActivity {
 
@@ -14,6 +18,17 @@ public class HelpActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_help);
+
+        // Android 15/16 (targetSdk 36) Edge-to-Edge WindowInsets handling
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        View rootView = (contentRoot != null && contentRoot.getChildCount() > 0) ? contentRoot.getChildAt(0) : contentRoot;
+        if (rootView != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
+                Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+                v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+                return WindowInsetsCompat.CONSUMED;
+            });
+        }
 
         Toolbar toolbar = findViewById(R.id.toolbar_help);
         setSupportActionBar(toolbar);
@@ -23,7 +38,7 @@ public class HelpActivity extends AppCompatActivity {
             getSupportActionBar().setTitle(R.string.help_title);
         }
 
-        // NEW: Set up the Contact Us button
+        // Set up the Contact Us button
         Button contactButton = findViewById(R.id.button_contact_us);
         contactButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -44,4 +59,3 @@ public class HelpActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 }
-
