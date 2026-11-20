@@ -37,7 +37,6 @@
     public void on*(androidx.lifecycle.LifecycleOwner);
 }
 
-# Preserve existing PDF rules from original proguard-rules-pro
+# Preserve PDF class rules (removed -keepresources which R8 does not support)
 -keep class com.tom_roush.pdfbox.** { *; }
--keepresources com/tom_roush/pdfbox/resources/**
 -dontwarn com.tom_roush.pdfbox.**
