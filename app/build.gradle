@@ -3,6 +3,7 @@ apply plugin: 'com.android.application'
 android {
     namespace 'com.txtify.app'
     compileSdkVersion 36
+    ndkVersion "28.0.12433566"
 
     defaultConfig {
         applicationId "com.txtify.app"
@@ -16,12 +17,18 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++17", "-fvisibility=hidden", "-O3"
-                arguments "-DANDROID_LD=lld"
+                arguments "-DANDROID_LD=lld", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
             }
         }
 
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 
