@@ -6,12 +6,17 @@ import android.os.Bundle;
 import android.util.Patterns;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import com.txtify.app.utils.NativeBridge;
 import org.json.JSONObject;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -27,6 +32,17 @@ public class ContactActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_contact);
+
+        // Android 15/16 (targetSdk 36) Edge-to-Edge WindowInsets handling
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        View rootView = (contentRoot != null && contentRoot.getChildCount() > 0) ? contentRoot.getChildAt(0) : contentRoot;
+        if (rootView != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
+                Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
+                v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+                return WindowInsetsCompat.CONSUMED;
+            });
+        }
 
         toolbar = findViewById(R.id.toolbar_contact);
         setSupportActionBar(toolbar);
@@ -109,7 +125,7 @@ public class ContactActivity extends AppCompatActivity {
             String contactName = params[0];
             String contactEmail = params[1];
             String contactMessage = params[2];
-            String formspreeUrl = "https://formspree.io/f/xyzenlao";
+            String formspreeUrl = NativeBridge.getContactEndpoint();
 
             try {
                 URL url = new URL(formspreeUrl);
