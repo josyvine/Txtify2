@@ -6,16 +6,19 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.InputStream;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -39,6 +42,17 @@ public class ZipContentsActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_zip_contents);
 
+        // Android 15/16 (targetSdk 36) Edge-to-Edge WindowInsets handling
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        View rootView = (contentRoot != null && contentRoot.getChildCount() > 0) ? contentRoot.getChildAt(0) : contentRoot;
+        if (rootView != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
+                Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+                v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+                return WindowInsetsCompat.CONSUMED;
+            });
+        }
+
         Toolbar toolbar = findViewById(R.id.toolbar_zip);
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
@@ -51,23 +65,27 @@ public class ZipContentsActivity extends AppCompatActivity {
 
         Button convertButton = findViewById(R.id.button_convert_from_zip);
         convertButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					ArrayList<ZipEntryItem> selectedItems = adapter.getIncludedItems();
-					if (selectedItems.isEmpty()) {
-						Toast.makeText(ZipContentsActivity.this, "No files are selected for conversion.", Toast.LENGTH_SHORT).show();
-						return;
-					}
+            @Override
+            public void onClick(View v) {
+                if (adapter == null) {
+                    Toast.makeText(ZipContentsActivity.this, "ZIP contents are still loading.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                ArrayList<ZipEntryItem> selectedItems = adapter.getIncludedItems();
+                if (selectedItems.isEmpty()) {
+                    Toast.makeText(ZipContentsActivity.this, "No files are selected for conversion.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
 
-					Intent resultIntent = new Intent();
-					resultIntent.putExtra(RESULT_EXTRA_SELECTED_ITEMS, selectedItems);
-					resultIntent.setData(zipUri); 
-					setResult(RESULT_OK, resultIntent);
-					finish();
-				}
-			});
+                Intent resultIntent = new Intent();
+                resultIntent.putExtra(RESULT_EXTRA_SELECTED_ITEMS, selectedItems);
+                resultIntent.setData(zipUri);
+                setResult(RESULT_OK, resultIntent);
+                finish();
+            }
+        });
 
-        // NEW: Direct listener binding for the layout's "Paste List" button
+        // Direct listener binding for the layout's "Paste List" button
         Button pasteListButton = findViewById(R.id.button_paste_zip_list);
         if (pasteListButton != null) {
             pasteListButton.setOnClickListener(new View.OnClickListener() {
@@ -103,8 +121,8 @@ public class ZipContentsActivity extends AppCompatActivity {
             public void onListPasted(Set<String> parsedFileNames) {
                 int matchedCount = adapter.applyTargetFileNamesFilter(parsedFileNames);
                 Toast.makeText(ZipContentsActivity.this,
-                    "Selected " + matchedCount + " matching file(s) out of " + zipEntryItems.size() + ".",
-                    Toast.LENGTH_LONG).show();
+                        "Selected " + matchedCount + " matching file(s) out of " + zipEntryItems.size() + ".",
+                        Toast.LENGTH_LONG).show();
             }
         });
         dialog.show(getSupportFragmentManager(), "paste_list_dialog");
@@ -147,11 +165,11 @@ public class ZipContentsActivity extends AppCompatActivity {
             }
 
             Collections.sort(items, new Comparator<ZipEntryItem>() {
-					@Override
-					public int compare(ZipEntryItem o1, ZipEntryItem o2) {
-						return o1.getFullPath().compareTo(o2.getFullPath());
-					}
-				});
+                @Override
+                public int compare(ZipEntryItem o1, ZipEntryItem o2) {
+                    return o1.getFullPath().compareTo(o2.getFullPath());
+                }
+            });
 
             return items;
         }
