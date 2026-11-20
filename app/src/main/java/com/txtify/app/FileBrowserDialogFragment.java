@@ -1,13 +1,17 @@
 package com.txtify.app;
 
-import android.Manifest;
+import android.app.Activity;
 import android.app.Dialog;
 import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.DialogInterface;
-import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,57 +22,58 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
 import androidx.fragment.app.DialogFragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
-// New imports for modern Android permission handling
-import android.os.Build;
-import android.provider.Settings;
-import android.net.Uri;
-import android.content.Intent;
+import java.util.Stack;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class FileBrowserDialogFragment extends DialogFragment {
 
-    // MODIFIED: Updated callback interface
     public interface FileBrowserCallbacks {
-        void onFilesAdded(ArrayList<File> files);
+        void onFilesAdded(ArrayList<Uri> files);
         void onBrowserClosed();
     }
 
-    private static final int PERMISSIONS_REQUEST_READ_STORAGE = 201;
+    private static final int REQUEST_CODE_PICK_BROWSE_FOLDER = 201;
+    private static final String PREFS_NAME = "TxtifyPrefs";
+    private static final String KEY_BROWSER_ROOT_URI = "browserRootFolderUri";
 
     private RecyclerView recyclerView;
     private TextView currentPathText;
     private TextView emptyFolderText;
     private ImageButton upButton;
-    private ImageButton addSelectedButton; // NEW
+    private ImageButton addSelectedButton;
     private Button selectAllButton;
     private Button clearSelectionButton;
-    private Button closeButton; // NEW
-    private Button pasteSearchButton; // NEW: Paste and search button
+    private Button closeButton;
+    private Button pasteSearchButton;
 
-    private File currentDirectory;
+    private DocumentFile currentDirectory;
+    private final Stack<DocumentFile> directoryHistory = new Stack<>();
     private FileBrowserCallbacks callbacks;
     private FileBrowserAdapter adapter;
 
-    // NEW: The fragment now owns the master set of selected files.
-    private Set<File> selectedFiles = new HashSet<>();
+    // Master set of selected file URIs owned by the fragment
+    private final Set<Uri> selectedFiles = new HashSet<>();
+
+    private ExecutorService executorService;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     public static FileBrowserDialogFragment newInstance() {
         return new FileBrowserDialogFragment();
     }
 
     @Override
-    public void onAttach(@NonNull android.content.Context context) {
+    public void onAttach(@NonNull Context context) {
         super.onAttach(context);
         if (context instanceof FileBrowserCallbacks) {
             callbacks = (FileBrowserCallbacks) context;
@@ -81,7 +86,7 @@ public class FileBrowserDialogFragment extends DialogFragment {
     public void onStart() {
         super.onStart();
         Dialog dialog = getDialog();
-        if (dialog != null) {
+        if (dialog != null && dialog.getWindow() != null) {
             int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.95);
             int height = (int) (getResources().getDisplayMetrics().heightPixels * 0.85);
             dialog.getWindow().setLayout(width, height);
@@ -91,6 +96,7 @@ public class FileBrowserDialogFragment extends DialogFragment {
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        executorService = Executors.newSingleThreadExecutor();
         return inflater.inflate(R.layout.fragment_file_browser, container, false);
     }
 
@@ -98,71 +104,82 @@ public class FileBrowserDialogFragment extends DialogFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        getDialog().setTitle("Select and Drag Files");
+        if (getDialog() != null) {
+            getDialog().setTitle("Select and Drag Files");
+        }
 
         recyclerView = view.findViewById(R.id.recycler_view_files);
         currentPathText = view.findViewById(R.id.text_current_path);
         emptyFolderText = view.findViewById(R.id.text_empty_folder);
         upButton = view.findViewById(R.id.button_up_directory);
-        addSelectedButton = view.findViewById(R.id.button_add_selected); // NEW
+        addSelectedButton = view.findViewById(R.id.button_add_selected);
         selectAllButton = view.findViewById(R.id.button_select_all);
         clearSelectionButton = view.findViewById(R.id.button_clear_selection);
-        closeButton = view.findViewById(R.id.button_close_browser); // NEW
-        pasteSearchButton = view.findViewById(R.id.button_paste_search); // NEW
+        closeButton = view.findViewById(R.id.button_close_browser);
+        pasteSearchButton = view.findViewById(R.id.button_paste_search);
 
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
 
+        // Allow tapping the path bar anytime to switch the base folder
+        currentPathText.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestFolderAccess();
+            }
+        });
+
         upButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					if (currentDirectory != null && currentDirectory.getParentFile() != null) {
-						navigateTo(currentDirectory.getParentFile());
-					}
-				}
-			});
+            @Override
+            public void onClick(View v) {
+                if (!directoryHistory.isEmpty()) {
+                    navigateTo(directoryHistory.pop(), false);
+                } else if (currentDirectory != null && currentDirectory.getParentFile() != null) {
+                    navigateTo(currentDirectory.getParentFile(), false);
+                } else {
+                    Toast.makeText(getContext(), "At root folder. Tap path to switch folder.", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
 
-        // NEW: Listener for the "Add Selected" tick button
         addSelectedButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					if (callbacks != null && !selectedFiles.isEmpty()) {
-						callbacks.onFilesAdded(new ArrayList<>(selectedFiles));
-						if (adapter != null) {
-							adapter.clearSelection();
-						}
-					} else {
-						Toast.makeText(getContext(), "No files selected.", Toast.LENGTH_SHORT).show();
-					}
-				}
-			});
+            @Override
+            public void onClick(View v) {
+                if (callbacks != null && !selectedFiles.isEmpty()) {
+                    callbacks.onFilesAdded(new ArrayList<>(selectedFiles));
+                    if (adapter != null) {
+                        adapter.clearSelection();
+                    }
+                } else {
+                    Toast.makeText(getContext(), "No files selected.", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
 
-        // NEW: Listener for the "Close" button
         closeButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					dismiss();
-				}
-			});
+            @Override
+            public void onClick(View v) {
+                dismiss();
+            }
+        });
 
         selectAllButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					if (adapter != null) {
-						adapter.selectAllFiles();
-					}
-				}
-			});
+            @Override
+            public void onClick(View v) {
+                if (adapter != null) {
+                    adapter.selectAllFiles();
+                }
+            }
+        });
 
         clearSelectionButton.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					if (adapter != null) {
-						adapter.clearSelection();
-					}
-				}
-			});
+            @Override
+            public void onClick(View v) {
+                if (adapter != null) {
+                    adapter.clearSelection();
+                }
+            }
+        });
 
-        // NEW: Listener for "Paste & Search" button
         if (pasteSearchButton != null) {
             pasteSearchButton.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -172,7 +189,7 @@ public class FileBrowserDialogFragment extends DialogFragment {
             });
         }
 
-        checkAndRequestPermissions();
+        checkAndOpenRootFolder();
     }
 
     /**
@@ -199,12 +216,12 @@ public class FileBrowserDialogFragment extends DialogFragment {
      * AsyncTask to recursively traverse all subfolders under currentDirectory
      * and select any matching files automatically.
      */
-    private class RecursiveSearchTask extends AsyncTask<Void, Void, List<File>> {
-        private final File parentDir;
+    private class RecursiveSearchTask extends AsyncTask<Void, Void, List<Uri>> {
+        private final DocumentFile parentDir;
         private final Set<String> targetNames;
         private ProgressDialog progressDialog;
 
-        public RecursiveSearchTask(File parentDir, Set<String> targetNames) {
+        public RecursiveSearchTask(DocumentFile parentDir, Set<String> targetNames) {
             this.parentDir = parentDir;
             this.targetNames = targetNames;
         }
@@ -219,35 +236,36 @@ public class FileBrowserDialogFragment extends DialogFragment {
         }
 
         @Override
-        protected List<File> doInBackground(Void... voids) {
-            List<File> matchedFiles = new ArrayList<>();
+        protected List<Uri> doInBackground(Void... voids) {
+            List<Uri> matchedFiles = new ArrayList<>();
             searchFolderRecursively(parentDir, targetNames, matchedFiles);
             return matchedFiles;
         }
 
-        private void searchFolderRecursively(File dir, Set<String> targets, List<File> result) {
+        private void searchFolderRecursively(DocumentFile dir, Set<String> targets, List<Uri> result) {
             if (dir == null || !dir.exists() || !dir.isDirectory() || !dir.canRead()) {
                 return;
             }
 
-            File[] files = dir.listFiles();
+            DocumentFile[] files = dir.listFiles();
             if (files == null) {
                 return;
             }
 
-            for (File file : files) {
+            for (DocumentFile file : files) {
                 if (file.isDirectory()) {
                     searchFolderRecursively(file, targets, result);
                 } else if (file.isFile()) {
-                    if (FileNameParserUtils.matchesAny(file.getName(), targets)) {
-                        result.add(file);
+                    String name = file.getName();
+                    if (name != null && FileNameParserUtils.matchesAny(name, targets)) {
+                        result.add(file.getUri());
                     }
                 }
             }
         }
 
         @Override
-        protected void onPostExecute(List<File> matchedFiles) {
+        protected void onPostExecute(List<Uri> matchedFiles) {
             super.onPostExecute(matchedFiles);
             if (progressDialog != null && progressDialog.isShowing()) {
                 progressDialog.dismiss();
@@ -266,119 +284,144 @@ public class FileBrowserDialogFragment extends DialogFragment {
     }
 
     @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdownNow();
+        }
+    }
+
+    @Override
     public void onDismiss(@NonNull DialogInterface dialog) {
         super.onDismiss(dialog);
-        // MODIFIED: Use the new callback method
         if (callbacks != null) {
             callbacks.onBrowserClosed();
         }
     }
 
-    private void navigateTo(File directory) {
-        if (!directory.isDirectory() || !directory.canRead()) {
+    private void navigateTo(final DocumentFile directory, boolean addToHistory) {
+        if (directory == null || !directory.isDirectory() || !directory.canRead()) {
             Toast.makeText(getContext(), "Cannot access this folder.", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        if (addToHistory && currentDirectory != null) {
+            directoryHistory.push(currentDirectory);
+        }
+
         currentDirectory = directory;
-        currentPathText.setText(directory.getAbsolutePath());
+        String dirName = directory.getName();
+        currentPathText.setText(dirName != null ? dirName + " (tap to switch)" : "Selected Folder");
 
-        File[] filesArray = directory.listFiles();
-        List<File> files;
-        if (filesArray != null) {
-            files = new ArrayList<>(Arrays.asList(filesArray));
-        } else {
-            files = new ArrayList<>();
-        }
+        executorService.execute(new Runnable() {
+            @Override
+            public void run() {
+                DocumentFile[] filesArray = directory.listFiles();
+                final List<DocumentFile> files = (filesArray != null)
+                        ? new ArrayList<>(Arrays.asList(filesArray))
+                        : new ArrayList<DocumentFile>();
 
-        if (files.isEmpty()) {
-            emptyFolderText.setVisibility(View.VISIBLE);
-            recyclerView.setVisibility(View.GONE);
-        } else {
-            emptyFolderText.setVisibility(View.GONE);
-            recyclerView.setVisibility(View.VISIBLE);
-        }
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isAdded() || getContext() == null) return;
 
-        // MODIFIED: Pass the master selectedFiles set to the adapter's constructor.
-        adapter = new FileBrowserAdapter(getContext(), files, selectedFiles,
-            new FileBrowserAdapter.OnItemClickListener() {
-                @Override
-                public void onItemClick(File file) {
-                    if (file.isDirectory()) {
-                        navigateTo(file);
+                        if (files.isEmpty()) {
+                            emptyFolderText.setVisibility(View.VISIBLE);
+                            recyclerView.setVisibility(View.GONE);
+                        } else {
+                            emptyFolderText.setVisibility(View.GONE);
+                            recyclerView.setVisibility(View.VISIBLE);
+                        }
+
+                        adapter = new FileBrowserAdapter(
+                                getContext(),
+                                files,
+                                selectedFiles,
+                                new FileBrowserAdapter.OnItemClickListener() {
+                                    @Override
+                                    public void onItemClick(DocumentFile file) {
+                                        if (file.isDirectory()) {
+                                            navigateTo(file, true);
+                                        }
+                                    }
+                                },
+                                new FileBrowserAdapter.OnDragStartListener() {
+                                    @Override
+                                    public void onDragStarted() {
+                                        dismiss();
+                                    }
+                                }
+                        );
+
+                        recyclerView.setAdapter(adapter);
                     }
-                    // A short click on a file now toggles selection (handled in adapter)
-                }
-            },
-            new FileBrowserAdapter.OnDragStartListener() {
-                @Override
-                public void onDragStarted() {
-                    dismiss(); // Dismiss the dialog if a drag is started.
-                }
+                });
             }
-        );
-
-        recyclerView.setAdapter(adapter);
+        });
     }
 
-    private void checkAndRequestPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Under Android 11 to 15+, check for All Files Access Manager permission
-            if (Environment.isExternalStorageManager()) {
-                initializeBrowser();
-            } else {
-                try {
-                    Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                    intent.addCategory("android.intent.category.DEFAULT");
-                    intent.setData(Uri.parse(String.format("package:%s", getContext().getPackageName())));
-                    startActivityForResult(intent, PERMISSIONS_REQUEST_READ_STORAGE);
-                } catch (Exception e) {
-                    Intent intent = new Intent();
-                    intent.setAction(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                    startActivityForResult(intent, PERMISSIONS_REQUEST_READ_STORAGE);
+    private void checkAndOpenRootFolder() {
+        Context context = getContext();
+        if (context == null) return;
+
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String savedUri = prefs.getString(KEY_BROWSER_ROOT_URI, null);
+
+        if (savedUri != null) {
+            try {
+                DocumentFile root = DocumentFile.fromTreeUri(context, Uri.parse(savedUri));
+                if (root != null && root.isDirectory() && root.canRead()) {
+                    navigateTo(root, false);
+                    return;
                 }
+            } catch (Exception ignored) {
             }
-        } else {
-            // Fallback for Android 10 and older devices
-            if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
-                                   PERMISSIONS_REQUEST_READ_STORAGE);
-            } else {
-                initializeBrowser();
-            }
+            prefs.edit().remove(KEY_BROWSER_ROOT_URI).apply();
         }
+
+        requestFolderAccess();
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        if (requestCode == PERMISSIONS_REQUEST_READ_STORAGE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                initializeBrowser();
-            } else {
-                Toast.makeText(getContext(), "Read permission is required to browse files.", Toast.LENGTH_LONG).show();
-                dismiss();
-            }
-        }
+    private void requestFolderAccess() {
+        Toast.makeText(getContext(), "Select a folder to browse.", Toast.LENGTH_SHORT).show();
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_CODE_PICK_BROWSE_FOLDER);
     }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PERMISSIONS_REQUEST_READ_STORAGE) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (Environment.isExternalStorageManager()) {
-                    initializeBrowser();
-                } else {
-                    Toast.makeText(getContext(), "All Files Access permission is required to browse files.", Toast.LENGTH_LONG).show();
-                    dismiss();
+        if (requestCode == REQUEST_CODE_PICK_BROWSE_FOLDER) {
+            Context context = getContext();
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null && context != null) {
+                Uri treeUri = data.getData();
+                try {
+                    context.getContentResolver().takePersistableUriPermission(
+                            treeUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    );
+                } catch (Exception ignored) {
                 }
+
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(KEY_BROWSER_ROOT_URI, treeUri.toString())
+                        .apply();
+
+                DocumentFile root = DocumentFile.fromTreeUri(context, treeUri);
+                if (root != null && root.isDirectory()) {
+                    directoryHistory.clear();
+                    navigateTo(root, false);
+                } else {
+                    Toast.makeText(context, "Could not open selected folder.", Toast.LENGTH_LONG).show();
+                    if (currentDirectory == null) dismiss();
+                }
+            } else if (currentDirectory == null) {
+                Toast.makeText(getContext(), "Please select a folder to browse files.", Toast.LENGTH_LONG).show();
+                dismiss();
             }
         }
-    }
-
-    private void initializeBrowser() {
-        File root = Environment.getExternalStorageDirectory();
-        navigateTo(root);
     }
 }
