@@ -5,29 +5,28 @@ import android.app.Application;
 import android.os.Bundle;
 import android.util.Log;
 import androidx.annotation.NonNull;
-import androidx.lifecycle.Lifecycle;
-import androidx.lifecycle.LifecycleObserver;
-import androidx.lifecycle.OnLifecycleEvent;
+import androidx.annotation.Nullable;
+import androidx.lifecycle.DefaultLifecycleObserver;
+import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.ProcessLifecycleOwner;
 import com.google.android.gms.ads.AdError;
 import com.google.android.gms.ads.AdRequest;
 import com.google.android.gms.ads.FullScreenContentCallback;
 import com.google.android.gms.ads.LoadAdError;
 import com.google.android.gms.ads.appopen.AppOpenAd;
+import com.txtify.app.utils.NativeBridge;
 import java.util.Date;
 
 /**
  * Prefetches App Open Ads and displays them when the app returns to the foreground.
  */
-public class AppOpenManager implements LifecycleObserver, Application.ActivityLifecycleCallbacks {
+public class AppOpenManager implements DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
 
     private static final String LOG_TAG = "AppOpenManager";
-    // Your App Open Ad Unit ID from the screenshot
-    private static final String AD_UNIT_ID = "ca-app-pub-2223803405403727/8315151430";
 
     private AppOpenAd appOpenAd = null;
     private boolean isShowingAd = false;
-    private AppOpenAd.AppOpenAdLoadCallback loadCallback;
+    private boolean isLoadingAd = false;
 
     private final MyApplication myApplication;
     private Activity currentActivity;
@@ -43,33 +42,34 @@ public class AppOpenManager implements LifecycleObserver, Application.ActivityLi
 
     /** Request an ad */
     public void fetchAd() {
-        // Have unused ad, no need to fetch another
-        if (isAdAvailable()) {
+        // Have unused ad or already loading, no need to fetch another
+        if (isLoadingAd || isAdAvailable()) {
             return;
         }
 
-        loadCallback = new AppOpenAd.AppOpenAdLoadCallback() {
+        isLoadingAd = true;
+        AppOpenAd.AppOpenAdLoadCallback loadCallback = new AppOpenAd.AppOpenAdLoadCallback() {
             @Override
             public void onAdLoaded(@NonNull AppOpenAd ad) {
                 AppOpenManager.this.appOpenAd = ad;
                 AppOpenManager.this.loadTime = (new Date()).getTime();
+                isLoadingAd = false;
                 Log.d(LOG_TAG, "onAdLoaded");
             }
 
             @Override
             public void onAdFailedToLoad(@NonNull LoadAdError loadAdError) {
-                // Handle the error
+                isLoadingAd = false;
                 Log.d(LOG_TAG, "onAdFailedToLoad: " + loadAdError.getMessage());
             }
         };
 
         AdRequest request = getAdRequest();
         AppOpenAd.load(
-            myApplication, 
-            AD_UNIT_ID, 
-            request, 
-            AppOpenAd.APP_OPEN_AD_ORIENTATION_PORTRAIT, 
-            loadCallback
+                myApplication,
+                NativeBridge.getAppOpenAdId(),
+                request,
+                loadCallback
         );
     }
 
@@ -92,33 +92,34 @@ public class AppOpenManager implements LifecycleObserver, Application.ActivityLi
 
     /** Shows the ad if one isn't already showing. */
     public void showAdIfAvailable() {
-        // Only show ad if there is not already an ad showing and an ad is available
         if (!isShowingAd && isAdAvailable()) {
             Log.d(LOG_TAG, "Will show ad.");
 
             FullScreenContentCallback fullScreenContentCallback =
-                new FullScreenContentCallback() {
-                    @Override
-                    public void onAdDismissedFullScreenContent() {
-                        // Set the reference to null so isAdAvailable() returns false.
-                        AppOpenManager.this.appOpenAd = null;
-                        isShowingAd = false;
-                        fetchAd();
-                    }
+                    new FullScreenContentCallback() {
+                        @Override
+                        public void onAdDismissedFullScreenContent() {
+                            AppOpenManager.this.appOpenAd = null;
+                            isShowingAd = false;
+                            fetchAd();
+                        }
 
-                    @Override
-                    public void onAdFailedToShowFullScreenContent(AdError adError) {
-                        Log.d(LOG_TAG, "onAdFailedToShowFullScreenContent: " + adError.getMessage());
-                    }
+                        @Override
+                        public void onAdFailedToShowFullScreenContent(@NonNull AdError adError) {
+                            AppOpenManager.this.appOpenAd = null;
+                            isShowingAd = false;
+                            Log.d(LOG_TAG, "onAdFailedToShowFullScreenContent: " + adError.getMessage());
+                            fetchAd();
+                        }
 
-                    @Override
-                    public void onAdShowedFullScreenContent() {
-                        isShowingAd = true;
-                    }
-                };
+                        @Override
+                        public void onAdShowedFullScreenContent() {
+                            isShowingAd = true;
+                        }
+                    };
 
             appOpenAd.setFullScreenContentCallback(fullScreenContentCallback);
-            
+
             if (currentActivity != null) {
                 appOpenAd.show(currentActivity);
             }
@@ -128,25 +129,29 @@ public class AppOpenManager implements LifecycleObserver, Application.ActivityLi
         }
     }
 
-    /** LifecycleObserver method that shows the ad when the app moves to foreground. */
-    @OnLifecycleEvent(Lifecycle.Event.ON_START)
-    public void onStart() {
+    /** DefaultLifecycleObserver method that shows the ad when the app moves to foreground. */
+    @Override
+    public void onStart(@NonNull LifecycleOwner owner) {
         showAdIfAvailable();
         Log.d(LOG_TAG, "onStart");
     }
 
     // ActivityLifecycleCallback methods
     @Override
-    public void onActivityCreated(@NonNull Activity activity, Bundle savedInstanceState) {}
+    public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {}
 
     @Override
     public void onActivityStarted(@NonNull Activity activity) {
-        currentActivity = activity;
+        if (!isShowingAd) {
+            currentActivity = activity;
+        }
     }
 
     @Override
     public void onActivityResumed(@NonNull Activity activity) {
-        currentActivity = activity;
+        if (!isShowingAd) {
+            currentActivity = activity;
+        }
     }
 
     @Override
@@ -160,6 +165,8 @@ public class AppOpenManager implements LifecycleObserver, Application.ActivityLi
 
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
-        currentActivity = null;
+        if (currentActivity == activity) {
+            currentActivity = null;
+        }
     }
 }
