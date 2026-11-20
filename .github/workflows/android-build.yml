@@ -18,12 +18,18 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'ndk;28.0.12433566'
+          accept-android-sdk-licenses: true
+
       - name: Decode Keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/txtify.jks
 
       - name: Build Release APK & Play Store AAB
-        uses: gradle/gradle-build-action@v2
+        uses: gradle/gradle-build-action@v3
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/txtify.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -33,6 +39,59 @@ jobs:
           gradle-version: '8.11.1'
           cache-disabled: true
           arguments: clean app:assembleRelease app:bundleRelease
+
+      - name: Verify 16 KB Page Size Alignment in AAB
+        shell: bash
+        run: |
+          AAB_PATH="app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$AAB_PATH" ]; then
+            echo "❌ AAB file not found at $AAB_PATH"
+            exit 1
+          fi
+
+          SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          LLVM_OBJDUMP=$(find "$SDK_DIR/ndk" -name "llvm-objdump" | head -n 1)
+          if [ -z "$LLVM_OBJDUMP" ]; then
+            echo "❌ llvm-objdump not found in $SDK_DIR/ndk"
+            exit 1
+          fi
+
+          TMP_DIR=$(mktemp -d)
+          unzip -q "$AAB_PATH" "base/lib/arm64-v8a/*" "base/lib/x86_64/*" -d "$TMP_DIR" || true
+
+          FAILED=0
+          FOUND=0
+          while IFS= read -r -d '' SO; do
+            FOUND=1
+            REL_PATH="${SO#$TMP_DIR/}"
+            echo "Checking: $REL_PATH"
+            ALIGNS=$("$LLVM_OBJDUMP" -p "$SO" | grep "LOAD" | awk '{print $NF}')
+            if [ -z "$ALIGNS" ]; then
+              echo "  ⚠️ No LOAD segments found in $REL_PATH"
+              FAILED=1
+              continue
+            fi
+            for A in $ALIGNS; do
+              echo "  LOAD align: $A"
+              EXP=${A#2\*\*}
+              if ! [[ "$EXP" =~ ^[0-9]+$ ]] || [ "$EXP" -lt 14 ]; then
+                echo "  ❌ UNALIGNED (< 16KB): $REL_PATH ($A)"
+                FAILED=1
+              fi
+            done
+          done < <(find "$TMP_DIR" -name "*.so" -print0)
+
+          rm -rf "$TMP_DIR"
+          if [ "$FOUND" -eq 0 ]; then
+            echo "ℹ️ No 64-bit .so libraries found in AAB."
+            exit 0
+          fi
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "❌ 16 KB page size verification FAILED!"
+            exit 1
+          fi
+          echo "✅ All 64-bit .so libraries in the AAB are 16 KB aligned!"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
