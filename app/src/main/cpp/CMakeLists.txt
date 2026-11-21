@@ -12,9 +12,13 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
         -O3)
 
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
-        -Wl,--gc-sections
-        -Wl,-z,max-page-size=16384
+        "-Wl,--gc-sections"
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
         $<$<CONFIG:Release>:-s>)
+
+# Force maximum page size alignment compatibility for all targets (matched to LunarTag)
+set_property(TARGET ${CMAKE_PROJECT_NAME} PROPERTY LINK_FLAGS "-Wl,-z,max-page-size=16384")
 
 find_library(log-lib log)
 
